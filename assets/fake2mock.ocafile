@@ -1,0 +1,3 @@
+-- name=fake2mock
+-- precompiler=transformation
+RENAME ATTRIBUTE name=first_name surname=last_name height=hgt weight=wgt

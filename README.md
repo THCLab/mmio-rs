@@ -4,6 +4,12 @@
 
 ## Usage
 
+## Development
+Install [maturin](https://www.maturin.rs/installation)
+
+### Run
+`maturin develop && python p.py`
+
 ## License
 
 EUPL 1.2 

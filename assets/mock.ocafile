@@ -1,0 +1,3 @@
+ADD ATTRIBUTE first_name=Text last_name=Text hgt=Numeric wgt=Numeric
+ADD META en PROPS description="MOCK Standard Patient" name="MOCK Patient" 
+ADD CHARACTER_ENCODING ATTRS first_name="utf-8" last_name="utf-8" hgt="utf-8" wgt="utf-8"

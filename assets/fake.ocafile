@@ -1,0 +1,5 @@
+--name=fake
+
+ADD ATTRIBUTE name=Text surname=Text height=Numeric weight=Numeric
+ADD META en PROPS description="FAKE Standard Patient" name="FAKE Patient" 
+ADD CHARACTER_ENCODING ATTRS name="utf-8" surname="utf-8" height="utf-8" weight="utf-8"
