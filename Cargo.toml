@@ -11,8 +11,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 pyo3 = "0.22.0"
-oca-rs = { path = "../oca-rs/oca", version = "0.5.4" }
-# transformation-file = { path = "../oca-rs/transformation/transformation-file", version = "0.5.4" }
+oca-rs = { version = "0.5.5" }
+transformation-file = { version = "0.5.5" }
+oca-bundle-semantics = { version = "0.5.5" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 polars = "0.42.0"

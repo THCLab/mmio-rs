@@ -1,27 +1,38 @@
 #![allow(dead_code)]
 
-use oca_rs::facade::bundle::Bundle as OCABundle;
+use oca_bundle_semantics::state::oca::OCABundle as OCAMechanics;
 use polars::prelude::*;
-use pyo3::prelude::*;
+use pyo3::{exceptions::PyValueError, prelude::*};
 use pyo3_polars::PyDataFrame;
+use std::collections::HashMap;
+use transformation_file::state::Transformation;
 mod events;
 use events::*;
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct MMIOBundle {
+    mechanics: OCAMechanics,
+    meta: HashMap<String, String>,
+}
 
 #[pyclass(name = "OCABundle")]
 struct OCABundlePy {
-    inner: OCABundle,
+    inner: MMIOBundle,
     log: ProvenanceLog,
+    transformations: Vec<Transformation>,
     data: Vec<MMData>,
 }
 
 impl OCABundlePy {
-    fn new(inner: OCABundle) -> Self {
+    fn new(inner: MMIOBundle) -> Self {
         let mut log = ProvenanceLog::new();
         log.add_event(Box::new(LoadBundleEvent::new(inner.clone())));
 
         Self {
             inner,
             log,
+            transformations: vec![],
             data: vec![],
         }
     }
@@ -41,14 +52,54 @@ impl OCABundlePy {
         self.log.add_event(Box::new(FeedEvent::new(data)));
     }
 
-    fn transform(&mut self) -> PyResult<Vec<MMData>> {
+    fn import_link(&mut self, link: String) -> PyResult<()> {
+        let r = serde_json::from_str::<Transformation>(&link)
+            .map_err(|e| PyErr::new::<PyValueError, _>(format!("{}", e)))?;
+        let source_said = match &r.source {
+            Some(s) => s.clone(),
+            None => {
+                return Err(PyErr::new::<PyValueError, _>(
+                    "source attribute is required",
+                ))
+            }
+        };
+        let mechanics_said = match &self.inner.mechanics.said {
+            Some(s) => s,
+            None => {
+                return Err(PyErr::new::<PyValueError, _>(
+                    "mechanics.said attribute is required",
+                ))
+            }
+        };
+        if source_said != mechanics_said.to_string() {
+            return Err(PyErr::new::<PyValueError, _>(
+                "source attribute must be equal to mechanics.said",
+            ));
+        }
+        self.transformations.push(r);
+        Ok(())
+    }
+
+    fn transform(&mut self, target: String) -> PyResult<Vec<MMData>> {
+        let link = self
+            .transformations
+            .iter()
+            .find(|t| t.target == Some(target.clone()))
+            .ok_or_else(|| {
+                PyErr::new::<PyValueError, _>(
+                    "target attribute not found in transformations",
+                )
+            })?;
+
         let mut new_data: Vec<MMData> = vec![];
         let mut errors: Vec<PyErr> = vec![];
         self.data.iter().for_each(|d| {
-            new_data.push(self.transform_data(d.clone()).unwrap_or_else(|e| {
-                errors.push(e);
-                d.clone()
-            }));
+            new_data.push(self.transform_data(d.clone(), link).unwrap_or_else(
+                |e| {
+                    errors.push(e);
+                    d.clone()
+                },
+            ));
         });
 
         if !errors.is_empty() {
@@ -61,19 +112,16 @@ impl OCABundlePy {
 }
 
 impl OCABundlePy {
-    fn transform_data(&self, data: MMData) -> PyResult<MMData> {
-        let new_data = self.inner.transformations.iter().try_fold(
+    fn transform_data(
+        &self,
+        data: MMData,
+        link: &Transformation,
+    ) -> PyResult<MMData> {
+        let new_data = link.attributes.iter().try_fold(
             data.0.clone(),
-            |acc, t| {
-                t.attributes.iter().try_fold(
-                    acc,
-                    |mut acc,
-                     (old_name, new_name)|
-                     -> Result<DataFrame, PolarsError> {
-                        acc.rename(old_name, new_name)?;
-                        Ok(acc)
-                    },
-                )
+            |mut acc, (old_name, new_name)| -> Result<DataFrame, PolarsError> {
+                acc.rename(old_name, new_name)?;
+                Ok(acc)
             },
         );
         Ok(PyDataFrame(new_data.map_err(|e| {
@@ -85,10 +133,9 @@ impl OCABundlePy {
 #[pymodule]
 fn m2io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(m)]
-    fn load(b: String) -> PyResult<OCABundlePy> {
-        let r = serde_json::from_str::<OCABundle>(&b).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{}", e))
-        })?;
+    fn open(b: String) -> PyResult<OCABundlePy> {
+        let r = serde_json::from_str::<MMIOBundle>(&b)
+            .map_err(|e| PyErr::new::<PyValueError, _>(format!("{}", e)))?;
 
         let bundle = OCABundlePy::new(r);
 

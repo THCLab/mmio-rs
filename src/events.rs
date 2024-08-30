@@ -1,5 +1,4 @@
-use crate::MMData;
-use oca_rs::facade::bundle::Bundle as OCABundle;
+use crate::{MMData, MMIOBundle};
 use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 use pyo3_polars::PyDataFrame;
@@ -64,11 +63,11 @@ impl Sys {
 pub struct LoadBundleEvent {
     time: SystemTime,
     sys: Sys,
-    bundle: OCABundle,
+    bundle: MMIOBundle,
 }
 
 impl LoadBundleEvent {
-    pub fn new(bundle: OCABundle) -> Self {
+    pub fn new(bundle: MMIOBundle) -> Self {
         Self {
             time: SystemTime::now(),
             sys: Sys::new(),

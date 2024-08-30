@@ -1,3 +1,9 @@
 -- name=fake2mock
 -- precompiler=transformation
-RENAME ATTRIBUTE name=first_name surname=last_name height=hgt weight=wgt
+-- source=refs:ENnxCGDxYDGQpQw5r1u5zMc0C-u0Q_ixNGDFJ1U9yfxo
+-- target=refs:EBA3iXoZRgnJzu9L1OwR0Ke8bcTQ4B8IeJYFatiXMfh7
+
+LINK ATTRIBUTE name     -> first_name
+LINK ATTRIBUTE surname  -> last_name
+LINK ATTRIBUTE height   -> hgt
+LINK ATTRIBUTE weight   -> wgt
