@@ -13,9 +13,9 @@ link_object = '{"v":"OCAT10JSON000113_","d":"EJf3rFBEMZp3Ywv5l6k1E9A-VICWsUpzF7c
 mmio_fake = mmio.open(mmio_bundle_fake)
 mmio_fake.import_link(link_object)
 
-tabular_data_1 = pd.read_csv('assets/fake_0.csv')
+tabular_data_1 = pd.read_csv('./docs/examples/assets/fake_0.csv')
 mmio_fake.feed(tabular_data_1)
-tabular_data_2 = pd.read_csv('assets/fake_1.csv')
+tabular_data_2 = pd.read_csv('./docs/examples/assets/fake_1.csv')
 mmio_fake.feed(tabular_data_2)
 
 transformed_data = mmio_fake.transform(target='EBA3iXoZRgnJzu9L1OwR0Ke8bcTQ4B8IeJYFatiXMfh7')

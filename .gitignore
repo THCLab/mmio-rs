@@ -71,3 +71,6 @@ docs/_build/
 
 # Pyenv
 .python-version
+
+# Jupyter Notebook
+docs/examples/notebooks/.ipynb_checkpoints
