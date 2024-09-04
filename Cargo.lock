@@ -1024,6 +1024,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "m2io_tmp"
+version = "0.1.0"
+dependencies = [
+ "oca-bundle-semantics",
+ "oca-rs",
+ "polars",
+ "pyo3",
+ "pyo3-polars",
+ "serde",
+ "serde_json",
+ "transformation-file",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1052,20 +1066,6 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
-
-[[package]]
-name = "mmio-rs"
-version = "0.1.0"
-dependencies = [
- "oca-bundle-semantics",
- "oca-rs",
- "polars",
- "pyo3",
- "pyo3-polars",
- "serde",
- "serde_json",
- "transformation-file",
-]
 
 [[package]]
 name = "multiversion"

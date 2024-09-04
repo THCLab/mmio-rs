@@ -131,7 +131,7 @@ impl OCABundlePy {
 }
 
 #[pymodule]
-fn m2io(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn m2io_tmp(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(m)]
     fn open(b: String) -> PyResult<OCABundlePy> {
         let r = serde_json::from_str::<MMIOBundle>(&b)
