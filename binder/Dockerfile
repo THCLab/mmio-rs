@@ -15,13 +15,8 @@ RUN adduser --disabled-password \
     ${NB_USER}
 WORKDIR ${HOME}
 
-# git clone whitebox repos
-RUN apt-get install git \
-    && cd /home/${NB_USER} \
-    && git clone https://github.com/THCLab/mmio-rs \
-    && chown -R ${NB_USER} /home/${NB_USER}
+COPY . ${HOME}/mmio-rs
 
-WORKDIR ${HOME}/mmio-rs
+RUN pip install -r mmio-rs/docs/examples/requirements.txt
 
-# install python packages
-RUN pip install -r requirements.txt
+WORKDIR ${HOME}/mmio-rs/docs/examples/notebooks
