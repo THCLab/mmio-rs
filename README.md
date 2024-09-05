@@ -1,5 +1,7 @@
 # MMIO – MultiModal Integration Object
 
+[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/THCLab/mmio-rs/HEAD)
+
 ## Installation
 
 ## Usage
