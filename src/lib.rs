@@ -1,6 +1,13 @@
 #![allow(dead_code)]
 
-use oca_bundle_semantics::state::oca::OCABundle as OCAMechanics;
+use indexmap::IndexMap;
+use lazy_static::lazy_static;
+use oca_ast_semantics::ast::NestedAttrType;
+use oca_bundle_semantics::state::{
+    attribute::Attribute as MechanicsAttribute,
+    attribute::AttributeType as MechanicsAttributeType,
+    oca::OCABox as OCAMechanicsBox, oca::OCABundle as OCAMechanics,
+};
 use polars::prelude::*;
 use pyo3::{exceptions::PyValueError, prelude::*};
 use pyo3_polars::PyDataFrame;
@@ -20,8 +27,7 @@ struct MMIOBundle {
 struct OCABundlePy {
     inner: MMIOBundle,
     log: ProvenanceLog,
-    transformations: Vec<Transformation>,
-    data: Vec<MMData>,
+    data: MMData,
 }
 
 impl OCABundlePy {
@@ -32,13 +38,39 @@ impl OCABundlePy {
         Self {
             inner,
             log,
-            transformations: vec![],
-            data: vec![],
+            data: MMData::new(),
         }
     }
-}
 
-type MMData = PyDataFrame;
+    fn standard_said(standard: &str) -> Option<String> {
+        lazy_static! {
+            static ref STANDARDS: HashMap<String, String> = maplit::hashmap! {
+                "Standard1@1.0".to_string() => "EBA3iXoZRgnJzu9L1OwR0Ke8bcTQ4B8IeJYFatiXMfh7".to_string(),
+                "Standard2@1.0".to_string() => "ENnxCGDxYDGQpQw5r1u5zMc0C-u0Q_ixNGDFJ1U9yfxo".to_string()
+            };
+        }
+        STANDARDS.get(standard).cloned()
+    }
+
+    fn create_transformation(
+        &self,
+        source_said: String,
+        target_said: String,
+        linkage: HashMap<String, String>,
+    ) -> PyResult<Transformation> {
+        let mut attributes = IndexMap::new();
+        linkage.iter().for_each(|(k, v)| {
+            attributes.insert(k.clone(), v.clone());
+        });
+
+        Ok(Transformation {
+            said: None,
+            source: Some(source_said),
+            target: Some(target_said),
+            attributes,
+        })
+    }
+}
 
 #[pymethods]
 impl OCABundlePy {
@@ -47,8 +79,13 @@ impl OCABundlePy {
         self.log.events.iter().map(|e| e.get_event()).collect()
     }
 
-    fn feed(&mut self, data: MMData) {
-        self.data.push(data.clone());
+    #[getter]
+    fn get_data(&self) -> MMData {
+        self.data.clone()
+    }
+
+    fn ingest(&mut self, data: MMRecord) {
+        self.data.add_record(data.clone());
         self.log.add_event(Box::new(FeedEvent::new(data)));
     }
 
@@ -76,47 +113,65 @@ impl OCABundlePy {
                 "source attribute must be equal to mechanics.said",
             ));
         }
-        self.transformations.push(r);
+        self.data.add_transformation(r.clone());
         Ok(())
     }
 
-    fn transform(&mut self, target: String) -> PyResult<Vec<MMData>> {
-        let link = self
-            .transformations
-            .iter()
-            .find(|t| t.target == Some(target.clone()))
-            .ok_or_else(|| {
-                PyErr::new::<PyValueError, _>(
-                    "target attribute not found in transformations",
-                )
+    fn link(
+        &mut self,
+        standard: String,
+        linkage: HashMap<String, String>,
+    ) -> PyResult<()> {
+        let target_said =
+            Self::standard_said(standard.as_str()).ok_or_else(|| {
+                PyErr::new::<PyValueError, _>(format!(
+                    "standard {} not found",
+                    standard
+                ))
             })?;
 
-        let mut new_data: Vec<MMData> = vec![];
-        let mut errors: Vec<PyErr> = vec![];
-        self.data.iter().for_each(|d| {
-            new_data.push(self.transform_data(d.clone(), link).unwrap_or_else(
-                |e| {
-                    errors.push(e);
-                    d.clone()
-                },
-            ));
-        });
+        let transformation: Transformation = self.create_transformation(
+            self.inner.mechanics.said.clone().unwrap().to_string(),
+            target_said.to_string(),
+            linkage.clone(),
+        )?;
 
-        if !errors.is_empty() {
-            return Err(errors.remove(0));
-        }
+        self.data.add_transformation(transformation.clone());
 
-        self.log.add_event(Box::new(TransformEvent::new()));
-        Ok(new_data)
+        Ok(())
     }
 }
 
-impl OCABundlePy {
-    fn transform_data(
+type MMRecord = PyDataFrame;
+
+#[derive(Clone, Debug)]
+#[pyclass]
+struct MMData {
+    records: Vec<MMRecord>,
+    transformations: Vec<Transformation>,
+}
+
+impl MMData {
+    fn new() -> Self {
+        Self {
+            records: vec![],
+            transformations: vec![],
+        }
+    }
+
+    fn add_record(&mut self, record: MMRecord) {
+        self.records.push(record);
+    }
+
+    fn add_transformation(&mut self, transformation: Transformation) {
+        self.transformations.push(transformation);
+    }
+
+    fn transform_record(
         &self,
-        data: MMData,
+        data: MMRecord,
         link: &Transformation,
-    ) -> PyResult<MMData> {
+    ) -> PyResult<MMRecord> {
         let new_data = link.attributes.iter().try_fold(
             data.0.clone(),
             |mut acc, (old_name, new_name)| -> Result<DataFrame, PolarsError> {
@@ -130,6 +185,57 @@ impl OCABundlePy {
     }
 }
 
+#[pymethods]
+impl MMData {
+    #[getter]
+    fn get_records(&self) -> Vec<MMRecord> {
+        self.records.clone()
+    }
+
+    #[pyo3(name = "to")]
+    fn transform(
+        &mut self,
+        config: HashMap<String, String>,
+    ) -> PyResult<MMData> {
+        let standard = config.get("standard").ok_or_else(|| {
+            PyErr::new::<PyValueError, _>("standard attribute is required")
+        })?;
+        let target = OCABundlePy::standard_said(standard).ok_or_else(|| {
+            PyErr::new::<PyValueError, _>(format!(
+                "standard {} not found",
+                standard
+            ))
+        })?;
+
+        let link = self
+            .transformations
+            .iter()
+            .find(|t| t.target == Some(target.clone()))
+            .ok_or_else(|| {
+                PyErr::new::<PyValueError, _>(
+                    "target attribute not found in transformations",
+                )
+            })?;
+
+        let mut new_data: MMData = MMData::new();
+        let mut errors: Vec<PyErr> = vec![];
+        self.records.iter().for_each(|d| {
+            new_data.add_record(
+                self.transform_record(d.clone(), link).unwrap_or_else(|e| {
+                    errors.push(e);
+                    d.clone()
+                }),
+            );
+        });
+
+        if !errors.is_empty() {
+            return Err(errors.remove(0));
+        }
+
+        Ok(new_data)
+    }
+}
+
 #[pymodule]
 fn m2io_tmp(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(m)]
@@ -139,6 +245,45 @@ fn m2io_tmp(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
         let bundle = OCABundlePy::new(r);
 
+        Ok(bundle)
+    }
+
+    #[pyfn(m)]
+    fn infer_semantics(data: MMRecord) -> PyResult<OCABundlePy> {
+        let mut oca = OCAMechanicsBox::new();
+        data.0.schema().iter_fields().for_each(|f| {
+            let mut attr = MechanicsAttribute::new(f.name().to_string());
+            match f.data_type() {
+                DataType::Int64 => {
+                    attr.set_attribute_type(NestedAttrType::Value(
+                        MechanicsAttributeType::Numeric,
+                    ));
+                }
+                DataType::Float64 => {
+                    attr.set_attribute_type(NestedAttrType::Value(
+                        MechanicsAttributeType::Numeric,
+                    ));
+                }
+                DataType::String => {
+                    attr.set_attribute_type(NestedAttrType::Value(
+                        MechanicsAttributeType::Text,
+                    ));
+                }
+                _ => {
+                    attr.set_attribute_type(NestedAttrType::Value(
+                        MechanicsAttributeType::Text,
+                    ));
+                }
+            }
+            oca.add_attribute(attr);
+        });
+
+        let oca_bundle = oca.generate_bundle();
+        let mmio_bundle = MMIOBundle {
+            mechanics: oca_bundle,
+            meta: HashMap::new(),
+        };
+        let bundle = OCABundlePy::new(mmio_bundle);
         Ok(bundle)
     }
 

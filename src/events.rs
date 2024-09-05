@@ -1,4 +1,4 @@
-use crate::{MMData, MMIOBundle};
+use crate::{MMRecord, MMIOBundle};
 use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 use pyo3_polars::PyDataFrame;
@@ -90,7 +90,7 @@ impl Event for LoadBundleEvent {
 pub struct FeedEvent {
     time: SystemTime,
     sys: Sys,
-    data: MMData,
+    data: MMRecord,
 }
 
 impl FeedEvent {
