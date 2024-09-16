@@ -8,7 +8,7 @@ pip install m2io_tmp # name will change to m2io
 
 ## Usage
 
-Look at the example notebooks in `docs/examples/notebooks`.
+Look at the example notebooks in [`docs/examples/notebooks`](https://github.com/THCLab/mmio-rs/tree/main/docs/examples/notebooks).
 
 ## Development
 Install [maturin](https://www.maturin.rs/installation)
