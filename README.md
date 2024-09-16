@@ -1,10 +1,14 @@
 # MMIO – MultiModal Integration Object
 
-[![Binder](https://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/THCLab/mmio-rs/HEAD)
-
 ## Installation
 
+```
+pip install m2io_tmp # name will change to m2io
+```
+
 ## Usage
+
+Look at the example notebooks in `docs/examples/notebooks`.
 
 ## Development
 Install [maturin](https://www.maturin.rs/installation)
