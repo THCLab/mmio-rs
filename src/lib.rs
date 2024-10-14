@@ -9,7 +9,7 @@ use oca_bundle_semantics::state::{
     oca::OCABox as OCAMechanicsBox, oca::OCABundle as OCAMechanics,
 };
 use polars::prelude::*;
-use pyo3::{exceptions::PyValueError, prelude::*};
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 use pyo3_polars::PyDataFrame;
 use std::collections::HashMap;
 use transformation_file::state::Transformation;
@@ -56,7 +56,7 @@ impl OCABundlePy {
         &self,
         source_said: String,
         target_said: String,
-        linkage: HashMap<String, String>,
+        linkage: IndexMap<String, String>,
     ) -> PyResult<Transformation> {
         let mut attributes = IndexMap::new();
         linkage.iter().for_each(|(k, v)| {
@@ -120,7 +120,7 @@ impl OCABundlePy {
     fn link(
         &mut self,
         standard: String,
-        linkage: HashMap<String, String>,
+        linkage: Bound<'_, PyDict>,
     ) -> PyResult<()> {
         let target_said =
             Self::standard_said(standard.as_str()).ok_or_else(|| {
@@ -130,10 +130,20 @@ impl OCABundlePy {
                 ))
             })?;
 
+        let linkage_map: IndexMap<String, String> = linkage
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.extract::<String>().unwrap(),
+                    v.extract::<String>().unwrap(),
+                )
+            })
+            .collect();
+
         let transformation: Transformation = self.create_transformation(
             self.inner.mechanics.said.clone().unwrap().to_string(),
             target_said.to_string(),
-            linkage.clone(),
+            linkage_map.clone(),
         )?;
 
         self.data.add_transformation(transformation.clone());
@@ -175,7 +185,42 @@ impl MMData {
         let new_data = link.attributes.iter().try_fold(
             data.0.clone(),
             |mut acc, (old_name, new_name)| -> Result<DataFrame, PolarsError> {
-                acc.rename(old_name, new_name)?;
+                match acc.get_column_index(new_name) {
+                    Some(idx) => {
+                        let s0 = acc.select_at_idx(idx).unwrap().clone();
+                        let s = acc.select_series([old_name]).unwrap().clone();
+                        let s1 = s[0].clone();
+
+                        let series = Series::new(
+                            new_name,
+                            s0.iter()
+                                .enumerate()
+                                .map(|(i, value)| match value {
+                                    AnyValue::String(str) => {
+                                        let s1_value = s1.get(i).unwrap();
+                                        let v = match s1_value.get_str() {
+                                            Some(s) => s,
+                                            None => &s1_value.to_string(),
+                                        };
+                                        format!("{} {}", str, v,)
+                                    }
+                                    _ => format!(
+                                        "{} {}",
+                                        s0.get(i).unwrap(),
+                                        s1.get(i).unwrap()
+                                    ),
+                                })
+                                .collect::<StringChunked>()
+                                .into_series(),
+                        );
+
+                        acc.replace(new_name, series)?;
+                        acc = acc.drop(old_name)?;
+                    }
+                    None => {
+                        acc.rename(old_name, new_name)?;
+                    }
+                }
                 Ok(acc)
             },
         );

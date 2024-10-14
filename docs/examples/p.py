@@ -15,7 +15,7 @@ mmio_custom.ingest(tabular_data)
 
 mmio_custom.link("Standard1@1.0", linkage = {
     "name": "first_name",
-    "surname": "last_name",
+    "surname": "first_name",
     "height": "hgt",
     "weight": "wgt"
 })
