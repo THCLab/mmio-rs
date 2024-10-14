@@ -191,28 +191,67 @@ impl MMData {
                         let s = acc.select_series([old_name]).unwrap().clone();
                         let s1 = s[0].clone();
 
-                        let series = Series::new(
-                            new_name,
-                            s0.iter()
-                                .enumerate()
-                                .map(|(i, value)| match value {
-                                    AnyValue::String(str) => {
-                                        let s1_value = s1.get(i).unwrap();
-                                        let v = match s1_value.get_str() {
-                                            Some(s) => s,
-                                            None => &s1_value.to_string(),
-                                        };
-                                        format!("{} {}", str, v,)
-                                    }
-                                    _ => format!(
-                                        "{} {}",
-                                        s0.get(i).unwrap(),
-                                        s1.get(i).unwrap()
-                                    ),
-                                })
-                                .collect::<StringChunked>()
-                                .into_series(),
-                        );
+                        let series = match s0.dtype() {
+                            DataType::String => {
+                                Series::new(
+                                    new_name,
+                                    s0.str()
+                                        .unwrap()
+                                        .into_iter()
+                                        .enumerate()
+                                        .map(|(i, value)| match value {
+                                            Some(str) => {
+                                                let s1_value =
+                                                    s1.get(i).unwrap();
+                                                let v =
+                                                    match s1_value.get_str() {
+                                                        Some(s) => s,
+                                                        None => &s1_value
+                                                            .to_string(),
+                                                    };
+                                                format!("{} {}", str, v,)
+                                            }
+                                            None => {
+                                                format!(
+                                                    "{} {}",
+                                                    s0.get(i).unwrap(),
+                                                    s1.get(i).unwrap()
+                                                )
+                                                /* if value.is_integer() {
+                                                    value.add(&s1.get(i).unwrap()).to_string()
+                                                } else {
+                                                    format!(
+                                                        "{} {}",
+                                                        s0.get(i).unwrap(),
+                                                        s1.get(i).unwrap()
+                                                    )
+                                                } */
+                                            }
+                                        })
+                                        .collect::<StringChunked>()
+                                        .into_series(),
+                                )
+                            }
+                            DataType::Int64 => Series::new(
+                                new_name,
+                                s0.i64()
+                                    .unwrap()
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(i, value)| {
+                                        value.map(|v| {
+                                            v + s1
+                                                .get(i)
+                                                .unwrap()
+                                                .try_extract::<i64>()
+                                                .unwrap()
+                                        })
+                                    })
+                                    .collect::<Int64Chunked>()
+                                    .into_series(),
+                            ),
+                            _ => s1.clone(),
+                        };
 
                         acc.replace(new_name, series)?;
                         acc = acc.drop(old_name)?;
