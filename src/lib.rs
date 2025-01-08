@@ -2,35 +2,33 @@
 
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
-use oca_ast_semantics::ast::NestedAttrType;
-use oca_bundle_semantics::state::{
-    attribute::Attribute as MechanicsAttribute,
-    attribute::AttributeType as MechanicsAttributeType,
-    oca::OCABox as OCAMechanicsBox, oca::OCABundle as OCAMechanics,
+use oca_sdk_rs::{
+    build_from_ocafile, overlay, parse_oca_bundle_to_ocafile, Attribute,
+    AttributeType, NestedAttrType, OCABox, OCABundle,
 };
 use polars::prelude::*;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
 use pyo3_polars::PyDataFrame;
 use std::collections::HashMap;
-use transformation_file::state::Transformation;
 mod events;
 use events::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct MMIOBundle {
-    mechanics: OCAMechanics,
+    #[serde(rename = "oca_bundle")]
+    oca: OCABundle,
     meta: HashMap<String, String>,
 }
 
 #[pyclass(name = "OCABundle")]
-struct OCABundlePy {
+struct MMIOBundlePy {
     inner: MMIOBundle,
     log: ProvenanceLog,
     data: MMData,
 }
 
-impl OCABundlePy {
+impl MMIOBundlePy {
     fn new(inner: MMIOBundle) -> Self {
         let mut log = ProvenanceLog::new();
         log.add_event(Box::new(LoadBundleEvent::new(inner.clone())));
@@ -51,29 +49,10 @@ impl OCABundlePy {
         }
         STANDARDS.get(standard).cloned()
     }
-
-    fn create_transformation(
-        &self,
-        source_said: String,
-        target_said: String,
-        linkage: IndexMap<String, String>,
-    ) -> PyResult<Transformation> {
-        let mut attributes = IndexMap::new();
-        linkage.iter().for_each(|(k, v)| {
-            attributes.insert(k.clone(), v.clone());
-        });
-
-        Ok(Transformation {
-            said: None,
-            source: Some(source_said),
-            target: Some(target_said),
-            attributes,
-        })
-    }
 }
 
 #[pymethods]
-impl OCABundlePy {
+impl MMIOBundlePy {
     #[getter]
     fn get_events(&self) -> Vec<String> {
         self.log.events.iter().map(|e| e.get_event()).collect()
@@ -81,40 +60,18 @@ impl OCABundlePy {
 
     #[getter]
     fn get_data(&self) -> MMData {
-        self.data.clone()
+        let mut d = self.data.clone();
+        self.inner.oca.overlays.iter().for_each(|o| {
+            if let Some(link_ov) = o.as_any().downcast_ref::<overlay::Link>() {
+                d.add_links(link_ov.clone());
+            }
+        });
+        d
     }
 
     fn ingest(&mut self, data: MMRecord) {
         self.data.add_record(data.clone());
         self.log.add_event(Box::new(FeedEvent::new(data)));
-    }
-
-    fn import_link(&mut self, link: String) -> PyResult<()> {
-        let r = serde_json::from_str::<Transformation>(&link)
-            .map_err(|e| PyErr::new::<PyValueError, _>(format!("{}", e)))?;
-        let source_said = match &r.source {
-            Some(s) => s.clone(),
-            None => {
-                return Err(PyErr::new::<PyValueError, _>(
-                    "source attribute is required",
-                ))
-            }
-        };
-        let mechanics_said = match &self.inner.mechanics.said {
-            Some(s) => s,
-            None => {
-                return Err(PyErr::new::<PyValueError, _>(
-                    "mechanics.said attribute is required",
-                ))
-            }
-        };
-        if source_said != mechanics_said.to_string() {
-            return Err(PyErr::new::<PyValueError, _>(
-                "source attribute must be equal to mechanics.said",
-            ));
-        }
-        self.data.add_transformation(r.clone());
-        Ok(())
     }
 
     fn link(
@@ -140,13 +97,17 @@ impl OCABundlePy {
             })
             .collect();
 
-        let transformation: Transformation = self.create_transformation(
-            self.inner.mechanics.said.clone().unwrap().to_string(),
-            target_said.to_string(),
-            linkage_map.clone(),
-        )?;
+        let mut ocafile = parse_oca_bundle_to_ocafile(&self.inner.oca);
+        let mut add_link_command =
+            format!("ADD LINK refs:{} ATTRS", target_said);
+        linkage_map.iter().for_each(|(k, v)| {
+            add_link_command.push_str(&format!(" {}={}", k, v));
+        });
+        ocafile.push_str(&add_link_command);
 
-        self.data.add_transformation(transformation.clone());
+        let oca_bundle = build_from_ocafile(ocafile)
+            .map_err(|e| PyErr::new::<PyValueError, _>(format!("{:?}", e)))?;
+        self.inner.oca = oca_bundle;
 
         Ok(())
     }
@@ -158,14 +119,14 @@ type MMRecord = PyDataFrame;
 #[pyclass]
 struct MMData {
     records: Vec<MMRecord>,
-    transformations: Vec<Transformation>,
+    link_overlays: Vec<overlay::Link>,
 }
 
 impl MMData {
     fn new() -> Self {
         Self {
             records: vec![],
-            transformations: vec![],
+            link_overlays: vec![],
         }
     }
 
@@ -173,16 +134,16 @@ impl MMData {
         self.records.push(record);
     }
 
-    fn add_transformation(&mut self, transformation: Transformation) {
-        self.transformations.push(transformation);
+    fn add_links(&mut self, link_overlay: overlay::Link) {
+        self.link_overlays.push(link_overlay);
     }
 
     fn transform_record(
         &self,
         data: MMRecord,
-        link: &Transformation,
+        link: &overlay::Link,
     ) -> PyResult<MMRecord> {
-        let new_data = link.attributes.iter().try_fold(
+        let new_data = link.attribute_mapping.iter().try_fold(
             data.0.clone(),
             |mut acc, (old_name, new_name)| -> Result<DataFrame, PolarsError> {
                 match acc.get_column_index(new_name) {
@@ -284,20 +245,21 @@ impl MMData {
         let standard = config.get("standard").ok_or_else(|| {
             PyErr::new::<PyValueError, _>("standard attribute is required")
         })?;
-        let target = OCABundlePy::standard_said(standard).ok_or_else(|| {
-            PyErr::new::<PyValueError, _>(format!(
-                "standard {} not found",
-                standard
-            ))
-        })?;
+        let target =
+            MMIOBundlePy::standard_said(standard).ok_or_else(|| {
+                PyErr::new::<PyValueError, _>(format!(
+                    "standard {} not found",
+                    standard
+                ))
+            })?;
 
         let link = self
-            .transformations
+            .link_overlays
             .iter()
-            .find(|t| t.target == Some(target.clone()))
+            .find(|t| t.target_bundle == target.clone())
             .ok_or_else(|| {
                 PyErr::new::<PyValueError, _>(
-                    "target attribute not found in transformations",
+                    "target attribute not found in links",
                 )
             })?;
 
@@ -323,39 +285,39 @@ impl MMData {
 #[pymodule]
 fn m2io_tmp(m: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(m)]
-    fn open(b: String) -> PyResult<OCABundlePy> {
+    fn open(b: String) -> PyResult<MMIOBundlePy> {
         let r = serde_json::from_str::<MMIOBundle>(&b)
             .map_err(|e| PyErr::new::<PyValueError, _>(format!("{}", e)))?;
 
-        let bundle = OCABundlePy::new(r);
+        let bundle = MMIOBundlePy::new(r);
 
         Ok(bundle)
     }
 
     #[pyfn(m)]
-    fn infer_semantics(data: MMRecord) -> PyResult<OCABundlePy> {
-        let mut oca = OCAMechanicsBox::new();
+    fn infer_semantics(data: MMRecord) -> PyResult<MMIOBundlePy> {
+        let mut oca = OCABox::new();
         data.0.schema().iter_fields().for_each(|f| {
-            let mut attr = MechanicsAttribute::new(f.name().to_string());
+            let mut attr = Attribute::new(f.name().to_string());
             match f.data_type() {
                 DataType::Int64 => {
                     attr.set_attribute_type(NestedAttrType::Value(
-                        MechanicsAttributeType::Numeric,
+                        AttributeType::Numeric,
                     ));
                 }
                 DataType::Float64 => {
                     attr.set_attribute_type(NestedAttrType::Value(
-                        MechanicsAttributeType::Numeric,
+                        AttributeType::Numeric,
                     ));
                 }
                 DataType::String => {
                     attr.set_attribute_type(NestedAttrType::Value(
-                        MechanicsAttributeType::Text,
+                        AttributeType::Text,
                     ));
                 }
                 _ => {
                     attr.set_attribute_type(NestedAttrType::Value(
-                        MechanicsAttributeType::Text,
+                        AttributeType::Text,
                     ));
                 }
             }
@@ -364,10 +326,10 @@ fn m2io_tmp(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
         let oca_bundle = oca.generate_bundle();
         let mmio_bundle = MMIOBundle {
-            mechanics: oca_bundle,
+            oca: oca_bundle,
             meta: HashMap::new(),
         };
-        let bundle = OCABundlePy::new(mmio_bundle);
+        let bundle = MMIOBundlePy::new(mmio_bundle);
         Ok(bundle)
     }
 
