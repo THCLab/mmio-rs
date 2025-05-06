@@ -2,10 +2,12 @@ use crate::{MMRecord, MMIOBundle};
 use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 use pyo3_polars::PyDataFrame;
+use serde::{Deserialize, Serialize};
 use std::{any::type_name, time::SystemTime};
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ProvenanceLog {
-    pub events: Vec<EventBox>,
+    pub events: Vec<Event>,
 }
 
 impl ProvenanceLog {
@@ -13,22 +15,49 @@ impl ProvenanceLog {
         Self { events: vec![] }
     }
 
-    pub fn add_event(&mut self, e: EventBox) {
+    pub fn add_event(&mut self, e: Event) {
         self.events.push(e);
     }
 }
 
-type EventBox = Box<dyn Event + Send + Sync + 'static>;
+// type EventBox = Box<dyn Event + Send + Sync + 'static>;
+//
+// pub trait Event {
+//     fn get_event(&self) -> String;
+//     fn get_event_type(&self) -> String {
+//         let type_name = type_name::<Self>().to_string();
+//         type_name.split("::").last().unwrap().to_string()
+//     }
+// }
 
-pub trait Event {
-    fn get_event(&self) -> String;
-    fn get_event_type(&self) -> String {
-        let type_name = type_name::<Self>().to_string();
-        type_name.split("::").last().unwrap().to_string()
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "type")] // Optional: for tagged serialization
+pub enum Event {
+    LoadBundle(LoadBundleEvent),
+    Feed(FeedEvent),
+    Transform(TransformEvent),
+}
+
+impl Event {
+    pub fn get_event_type(&self) -> &'static str {
+        match self {
+            Event::LoadBundle(_) => "LoadBundleEvent",
+            Event::Feed(_) => "FeedEvent",
+            Event::Transform(_) => "TransformEvent",
+        }
+    }
+
+    pub fn get_event(&self) -> String {
+        match self {
+            Event::LoadBundle(e) => e.get_event(),
+            Event::Feed(e) => e.get_event(),
+            Event::Transform(e) => e.get_event(),
+        }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Sys {
     user: String,
     version: String,
@@ -60,6 +89,7 @@ impl Sys {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LoadBundleEvent {
     time: SystemTime,
     sys: Sys,
@@ -74,23 +104,40 @@ impl LoadBundleEvent {
             bundle,
         }
     }
-}
-
-impl Event for LoadBundleEvent {
-    fn get_event(&self) -> String {
-        format!(
-            "{}: {:?}, {:#?}",
-            self.get_event_type(),
-            self.sys,
-            self.bundle
-        )
+    pub fn get_event(&self) -> String {
+        format!("LoadBundleEvent: {:?}, {:#?}", self.sys, self.bundle)
     }
 }
 
+#[derive(Debug, Serialize)]
 pub struct FeedEvent {
     time: SystemTime,
     sys: Sys,
+    #[serde(skip)]
     data: MMRecord,
+}
+
+impl<'de> Deserialize<'de> for FeedEvent {
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let event = FeedEvent {
+            time: SystemTime::now(),
+            sys: Sys::new(),
+            data: dummy_record(),
+        };
+        Ok(event)
+    }
+}
+
+fn dummy_record() -> MMRecord {
+    // Create a dummy MMRecord here
+        Python::with_gil(|py| {
+        let pd = py.import_bound("pandas").unwrap();
+        let df = pd.call_method0("DataFrame").unwrap();
+        df.extract::<PyDataFrame>().unwrap()
+    })
 }
 
 impl FeedEvent {
@@ -101,19 +148,13 @@ impl FeedEvent {
             data,
         }
     }
-}
-
-impl Event for FeedEvent {
-    fn get_event(&self) -> String {
-        format!(
-            "{}: {:?}, {:#?}",
-            self.get_event_type(),
-            self.sys,
-            self.data.0
-        )
+    pub fn get_event(&self) -> String {
+        format!("FeedEvent: {:?}, {:#?}", self.sys, self.data.0)
     }
 }
 
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct TransformEvent {
     time: SystemTime,
     sys: Sys,
@@ -126,10 +167,8 @@ impl TransformEvent {
             sys: Sys::new(),
         }
     }
-}
-
-impl Event for TransformEvent {
-    fn get_event(&self) -> String {
-        format!("{}: {:?}", self.get_event_type(), self.sys)
+    pub fn get_event(&self) -> String {
+        format!("TransformEvent: {:?}", self.sys)
     }
 }
+
