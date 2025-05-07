@@ -20,12 +20,12 @@ impl From<said::SelfAddressingIdentifier> for PySaid {
 }
 
 #[pyclass(name = "MMIO")]
-#[derive(Debug, Serialize, Deserialize, SAD)]
+#[derive(Debug, Serialize, Deserialize, SAD, Clone)]
 pub struct MMIO {
     pub version: String,
     #[said]
     pub id: Option<SelfAddressingIdentifier>,
-    pub data: Vec<Modality>,
+    pub modalities: Vec<Modality>,
 }
 
 #[pyclass(name = "Modality")]
@@ -44,6 +44,8 @@ pub enum ModalityType {
     Image,
     Text,
     Audio,
+    Video,
+    Binary,
 }
 
 
@@ -53,6 +55,8 @@ impl IntoPy<PyObject> for ModalityType {
             ModalityType::Image => "image".into_py(py),
             ModalityType::Audio => "audio".into_py(py),
             ModalityType::Text => "text".into_py(py),
+            ModalityType::Binary => "binary".into_py(py),
+            ModalityType::Video => "video".into_py(py),
         }
     }
 }
@@ -121,7 +125,7 @@ impl MMIO {
     fn new() -> Self {
         Self {
             version: "0.1".to_string(),
-            data: vec![],
+            modalities: vec![],
             id: None,
         }
     }
@@ -167,13 +171,8 @@ impl Modality {
 #[pymethods]
 impl MMIO {
     #[getter]
-    fn get_data(&self) -> Vec<Modality> {
-        self.data.clone()
-    }
-
-    #[getter]
     fn get_modalities(&self) -> Vec<Modality> {
-        self.data.clone()
+        self.modalities.clone()
     }
 
     // fn ingest(&mut self, data: MMRecord) {
@@ -257,13 +256,11 @@ mod tests {
     fn test_create_new() {
         let mut mmio = MMIO::new();
         assert_eq!(mmio.version, "0.1");
-        assert_eq!(mmio.data.len(), 0);
+        assert_eq!(mmio.modalities.len(), 0);
         assert_eq!(mmio.id, None);
 
         let oca_bundle_json = r#"{"v":"OCAS20JSON000320_","digest":"EHJ58dssK7HxXJjATIdMjXy2aoJpZRH7cIai5NXPQaZD","capture_base":{"digest":"EHZSMO2EFsXy8r5XogQ381-VmOiTUQYjV3WNkBfWYaCH","type":"capture_base/2.0.0","attributes":{"first_name":"Text","hgt":"Numeric","last_name":"Text","wgt":"Numeric"}},"overlays":{"character_encoding":{"digest":"EEDz_xTwN9P8BCZcU33OfFrO_lWIry9Jl1srE9leGbwF","capture_base":"EHZSMO2EFsXy8r5XogQ381-VmOiTUQYjV3WNkBfWYaCH","type":"overlay/character_encoding/2.0.0","attribute_character_encoding":{"first_name":"utf-8","hgt":"utf-8","last_name":"utf-8","wgt":"utf-8"}},"meta":[{"digest":"EP9iNoIrLu9w3YAMNW8FLWj5sP6VpOIoTIvDeC_6kvK0","capture_base":"EHZSMO2EFsXy8r5XogQ381-VmOiTUQYjV3WNkBfWYaCH","type":"overlay/meta/2.0.0","language":"eng","description":"Standard 1 Patient BMI","name":"Patient BMI"}]}}"#;
         let oca_bundle: OCABundle = serde_json::from_str(oca_bundle_json).unwrap();
-        // serialize oca_bundle to string
-        let oca_bundle = serde_json::to_string(&oca_bundle).unwrap();
 
         let code = HashFunctionCode::Blake3_256;
         let format = SerializationFormats::JSON;
@@ -296,7 +293,7 @@ mod tests {
             oca_bundle: Semantic::Bundle(oca_bundle),
         };
         modality.compute_digest(&code, &format);
-        mmio.data.push(modality);
+        mmio.modalities.push(modality);
 
         mmio.compute_digest(&code, &format);
         let computed_digest = mmio.id.as_ref();
@@ -306,8 +303,8 @@ mod tests {
         println!("Serialized MMIO: {}", mmio.serialize().unwrap());
 
         assert_eq!(mmio.version, "0.1");
-        assert_eq!(mmio.data.len(), 1);
-        assert_eq!(mmio.data[0].media_type, "image/png");
+        assert_eq!(mmio.modalities.len(), 1);
+        assert_eq!(mmio.modalities[0].media_type, "image/png");
     }
 
     #[test]
@@ -315,8 +312,8 @@ mod tests {
         let json = r#"{"version":"0.1","id":"EI-TaIVg2tmtXMdjAlogb5OnmaAsdhHVnGqfhDMk4mTM","data":[{"id":"EA_zIBLGGyzCo5ywVZz5asrtktgxR2dLRiegv6-wmC89","modality_said":"EK0GaxzGUPg54gPrUVOE1BkmZyRJXWXjGmQCeZCjSNeQ","modality_type":"Image","media_type":"image/png","oca_bundle":{"type":"Bundle","value":{"digest":"EHJ58dssK7HxXJjATIdMjXy2aoJpZRH7cIai5NXPQaZD","capture_base":{"digest":"EHZSMO2EFsXy8r5XogQ381-VmOiTUQYjV3WNkBfWYaCH","type":"capture_base/2.0.0","attributes":{"first_name":"Text","hgt":"Numeric","last_name":"Text","wgt":"Numeric"}},"overlays":{"character_encoding":{"digest":"EEDz_xTwN9P8BCZcU33OfFrO_lWIry9Jl1srE9leGbwF","capture_base":"EHZSMO2EFsXy8r5XogQ381-VmOiTUQYjV3WNkBfWYaCH","type":"overlay/character_encoding/2.0.0","attribute_character_encoding":{"first_name":"utf-8","hgt":"utf-8","last_name":"utf-8","wgt":"utf-8"}},"meta":[{"digest":"EP9iNoIrLu9w3YAMNW8FLWj5sP6VpOIoTIvDeC_6kvK0","capture_base":"EHZSMO2EFsXy8r5XogQ381-VmOiTUQYjV3WNkBfWYaCH","type":"overlay/meta/2.0.0","language":"eng","description":"Standard 1 Patient BMI","name":"Patient BMI"}]}}}}]}"#;
         let mmio: MMIO = serde_json::from_str(json).unwrap();
         assert_eq!(mmio.version, "0.1");
-        assert_eq!(mmio.data.len(), 1);
-        assert_eq!(mmio.data[0].media_type, "image/png");
+        assert_eq!(mmio.modalities.len(), 1);
+        assert_eq!(mmio.modalities[0].media_type, "image/png");
         assert_eq!(mmio.id.as_ref(), Some(&"EI-TaIVg2tmtXMdjAlogb5OnmaAsdhHVnGqfhDMk4mTM".parse().unwrap()));
     }
 }
