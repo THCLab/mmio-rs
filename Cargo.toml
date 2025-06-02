@@ -17,7 +17,7 @@ path = "src/bin/main.rs"
 [dependencies]
 pyo3 = "0.22.0"
 oca-sdk-rs = { version = "2.0.0-rc1", path = "../oca-sdk-rs" }
-said = { version = "0.4.2", features = ["macros", "file"], path = "../cesrox/said" }
+said = { version = "0.5.0", features = ["file"], path = "../cesrox/said" }
 maplit = "1.0.2"
 lazy_static = "1.5.0"
 indexmap = { version = "1.9.3", features = ["serde"]}
