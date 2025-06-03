@@ -38,7 +38,9 @@ pub struct Modality {
 
 impl MMIO {
     pub fn compute_digest(&mut self) {
+        self.version = "0.1".to_string();
         let serialized = serde_json::to_string(self).unwrap();
+        println!("{}", serialized);
         let code = HashFunctionCode::Blake3_256;
         let field_name = Some("digest");
         let computed = make_me_happy(&serialized, code, field_name).unwrap();
@@ -53,7 +55,7 @@ impl Modality {
         let code = HashFunctionCode::Blake3_256;
         let field_name = Some("digest");
         let computed = make_me_happy(&serialized, code, field_name).unwrap();
-        let modality_wiht_digest = serde_json::from_str::<MMIO>(&computed).unwrap();
+        let modality_wiht_digest = serde_json::from_str::<Modality>(&computed).unwrap();
         self.digest = Some(modality_wiht_digest.digest.unwrap());
     }
 }
