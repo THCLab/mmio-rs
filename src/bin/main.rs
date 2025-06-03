@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand};
 use m2io_tmp::{Modality, ModalityType, Semantic, MMIO};
 use said::derivation::{HashFunction, HashFunctionCode};
-use said::sad::SerializationFormats;
 use said::SelfAddressingIdentifier;
 use std::fs::{self, File};
 use std::io::Read;
@@ -19,7 +18,7 @@ struct Cli {
 enum Commands {
     /// Create a new MMIO object
     Create {
-        #[arg(long = "modalities",
+        #[arg(short = 'm', long = "modalities",
             value_parser = parse_modality,
             num_args = 0..,
             help = "Specify a modality using: file=path,bundle_said=<SAID>. Repeat for multiple modalities."
