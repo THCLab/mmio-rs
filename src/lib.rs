@@ -1,11 +1,10 @@
 #![allow(dead_code)]
 
-use oca_sdk_rs::OCABundle;
+use oca_sdk_rs::OCABundleModel;
 use pyo3::{exceptions::PyValueError, prelude::*};
-use said::{sad::SAD, SelfAddressingIdentifier};
+use said::{make_me_happy, SelfAddressingIdentifier};
 use serde::{Deserialize, Serialize};
 use said::derivation::HashFunctionCode;
-use said::version::format::SerializationFormats;
 
 #[pyclass]
 pub struct PySaid {
@@ -20,23 +19,43 @@ impl From<said::SelfAddressingIdentifier> for PySaid {
 }
 
 #[pyclass(name = "MMIO")]
-#[derive(Debug, Serialize, Deserialize, SAD, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MMIO {
     pub version: String,
-    #[said]
-    pub id: Option<SelfAddressingIdentifier>,
+    pub digest: Option<SelfAddressingIdentifier>,
     pub modalities: Vec<Modality>,
 }
 
 #[pyclass(name = "Modality")]
-#[derive(Clone, Debug, Serialize, Deserialize, SAD)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Modality {
-    #[said]
-    pub id: Option<SelfAddressingIdentifier>,
+    pub digest: Option<SelfAddressingIdentifier>,
     pub modality_said: Option<SelfAddressingIdentifier>,
     pub modality_type: ModalityType,
     pub media_type: String,
     pub oca_bundle: Semantic,
+}
+
+impl MMIO {
+    pub fn compute_digest(&mut self) {
+        let serialized = serde_json::to_string(self).unwrap();
+        let code = HashFunctionCode::Blake3_256;
+        let field_name = Some("digest");
+        let computed = make_me_happy(&serialized, code, field_name).unwrap();
+        let mmio_wiht_digest = serde_json::from_str::<MMIO>(&computed).unwrap();
+        self.digest = Some(mmio_wiht_digest.digest.unwrap());
+    }
+}
+
+impl Modality {
+    pub fn compute_digest(&mut self) {
+        let serialized = serde_json::to_string(self).unwrap();
+        let code = HashFunctionCode::Blake3_256;
+        let field_name = Some("digest");
+        let computed = make_me_happy(&serialized, code, field_name).unwrap();
+        let modality_wiht_digest = serde_json::from_str::<MMIO>(&computed).unwrap();
+        self.digest = Some(modality_wiht_digest.digest.unwrap());
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -65,7 +84,7 @@ impl IntoPy<PyObject> for ModalityType {
 #[serde(tag = "type", content = "value")]
 pub enum Semantic {
     Reference(SelfAddressingIdentifier),
-    Bundle(OCABundle),
+    Bundle(OCABundleModel),
 }
 
 #[pyclass]
@@ -77,11 +96,11 @@ pub struct PySemantic {
 #[pyclass]
 #[derive(Clone)]
 pub struct PyOCABundle {
-    inner: OCABundle,
+    inner: OCABundleModel,
 }
 
 impl PyOCABundle {
-    pub fn into_inner(&self) -> OCABundle {
+    pub fn into_inner(&self) -> OCABundleModel {
         self.inner.clone()
     }
 }
@@ -126,7 +145,7 @@ impl MMIO {
         Self {
             version: "0.1".to_string(),
             modalities: vec![],
-            id: None,
+            digest: None,
         }
     }
 }
@@ -135,7 +154,7 @@ impl MMIO {
 impl Modality {
     #[getter]
     fn get_id(&self) -> PySaid {
-        self.id.clone().map_or_else(
+        self.digest.clone().map_or_else(
             || PySaid { value: "None".to_string() },
             |id| PySaid { value: id.to_string() },
         )
@@ -257,13 +276,12 @@ mod tests {
         let mut mmio = MMIO::new();
         assert_eq!(mmio.version, "0.1");
         assert_eq!(mmio.modalities.len(), 0);
-        assert_eq!(mmio.id, None);
+        assert_eq!(mmio.digest, None);
 
         let oca_bundle_json = r#"{"v":"OCAS20JSON000320_","digest":"EHJ58dssK7HxXJjATIdMjXy2aoJpZRH7cIai5NXPQaZD","capture_base":{"digest":"EHZSMO2EFsXy8r5XogQ381-VmOiTUQYjV3WNkBfWYaCH","type":"capture_base/2.0.0","attributes":{"first_name":"Text","hgt":"Numeric","last_name":"Text","wgt":"Numeric"}},"overlays":{"character_encoding":{"digest":"EEDz_xTwN9P8BCZcU33OfFrO_lWIry9Jl1srE9leGbwF","capture_base":"EHZSMO2EFsXy8r5XogQ381-VmOiTUQYjV3WNkBfWYaCH","type":"overlay/character_encoding/2.0.0","attribute_character_encoding":{"first_name":"utf-8","hgt":"utf-8","last_name":"utf-8","wgt":"utf-8"}},"meta":[{"digest":"EP9iNoIrLu9w3YAMNW8FLWj5sP6VpOIoTIvDeC_6kvK0","capture_base":"EHZSMO2EFsXy8r5XogQ381-VmOiTUQYjV3WNkBfWYaCH","type":"overlay/meta/2.0.0","language":"eng","description":"Standard 1 Patient BMI","name":"Patient BMI"}]}}"#;
-        let oca_bundle: OCABundle = serde_json::from_str(oca_bundle_json).unwrap();
+        let oca_bundle: OCABundleModel = serde_json::from_str(oca_bundle_json).unwrap();
 
         let code = HashFunctionCode::Blake3_256;
-        let format = SerializationFormats::JSON;
 
         #[derive(Serialize, Deserialize)]
         struct Bmi {
@@ -286,17 +304,17 @@ mod tests {
 
 
         let mut modality = Modality {
-            id: None,
+            digest: None,
             modality_said: Some(said),
             modality_type: ModalityType::Image,
             media_type: "image/png".to_string(),
             oca_bundle: Semantic::Bundle(oca_bundle),
         };
-        modality.compute_digest(&code, &format);
+        modality.compute_digest();
         mmio.modalities.push(modality);
 
-        mmio.compute_digest(&code, &format);
-        let computed_digest = mmio.id.as_ref();
+        mmio.compute_digest();
+        let computed_digest = mmio.digest.as_ref();
 
         assert_eq!(computed_digest, Some(&"EI-TaIVg2tmtXMdjAlogb5OnmaAsdhHVnGqfhDMk4mTM".parse().unwrap()));
 
@@ -314,6 +332,6 @@ mod tests {
         assert_eq!(mmio.version, "0.1");
         assert_eq!(mmio.modalities.len(), 1);
         assert_eq!(mmio.modalities[0].media_type, "image/png");
-        assert_eq!(mmio.id.as_ref(), Some(&"EI-TaIVg2tmtXMdjAlogb5OnmaAsdhHVnGqfhDMk4mTM".parse().unwrap()));
+        assert_eq!(mmio.digest.as_ref(), Some(&"EI-TaIVg2tmtXMdjAlogb5OnmaAsdhHVnGqfhDMk4mTM".parse().unwrap()));
     }
 }
