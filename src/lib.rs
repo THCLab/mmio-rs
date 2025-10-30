@@ -70,6 +70,34 @@ pub enum ModalityType {
 }
 
 
+impl std::str::FromStr for ModalityType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "image" => Ok(ModalityType::Image),
+            "text" => Ok(ModalityType::Text),
+            "audio" => Ok(ModalityType::Audio),
+            "video" => Ok(ModalityType::Video),
+            "binary" => Ok(ModalityType::Binary),
+            _ => Err(format!("Invalid modality type: '{}'. Valid types are: image, text, audio, video, binary", s)),
+        }
+    }
+}
+
+impl std::fmt::Display for ModalityType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ModalityType::Image => write!(f, "image"),
+            ModalityType::Text => write!(f, "text"),
+            ModalityType::Audio => write!(f, "audio"),
+            ModalityType::Video => write!(f, "video"),
+            ModalityType::Binary => write!(f, "binary"),
+        }
+    }
+}
+
+
 impl IntoPy<PyObject> for ModalityType {
     fn into_py(self, py: Python<'_>) -> PyObject {
         match self {

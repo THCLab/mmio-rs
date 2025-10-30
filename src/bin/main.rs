@@ -38,20 +38,20 @@ enum Commands {
     },
 }
 
-fn modality_type_from_mime(mime: &str) -> ModalityType {
+fn modality_type_from_mime(mime: &str) -> Option<ModalityType> {
     if mime.starts_with("image/") {
-        ModalityType::Image
+        Some(ModalityType::Image)
     } else if mime.starts_with("text/") || mime == "application/json" {
-        ModalityType::Text
+        Some(ModalityType::Text)
     } else if mime.starts_with("audio/") {
-        ModalityType::Audio
+        Some(ModalityType::Audio)
     } else if mime.starts_with("video/") {
-        ModalityType::Video
+        Some(ModalityType::Video)
     } else if mime == "application/octet-stream" || mime.starts_with("application/") {
-        ModalityType::Binary
+        Some(ModalityType::Binary)
     } else {
-        // Fallback
-        ModalityType::Text
+        // default to text
+        Some(ModalityType::Text)
     }
 }
 
@@ -59,6 +59,8 @@ fn modality_type_from_mime(mime: &str) -> ModalityType {
 fn parse_modality(s: &str) -> Result<Modality, String> {
     let mut file = None;
     let mut bundle_said = None;
+    let mut modality_type = None;
+    let mut media_type = None;
 
     for part in s.split(',') {
         let mut kv = part.splitn(2, '=');
@@ -69,19 +71,32 @@ fn parse_modality(s: &str) -> Result<Modality, String> {
                 bundle_said = Some(said);
 
             },
+            (Some("modality_type"), Some(v)) => {
+                let mt: ModalityType = v.parse().unwrap();
+                modality_type = Some(mt);
+            },
+            (Some("media_type"), Some(v)) => media_type = Some(v.to_string()),
             _ => return Err(format!("Invalid modality format: {}", part)),
         }
     }
 
     match (file, bundle_said) {
         (Some(f), Some(b)) => {
-            // Infer MIME type from file content
+
             let mut buf = [0; 512];
             let mut file_reader = File::open(&f).map_err(|e| format!("Cannot open file: {}", e))?;
             let n = file_reader.read(&mut buf).map_err(|e| format!("Read error: {}", e))?;
-            let mime = infer::get(&buf[..n])
-                .map(|kind| kind.mime_type())
-                .unwrap_or("application/octet-stream");
+
+            if media_type.is_none() {
+                // Infer MIME type from file content
+                let mime = infer::get(&buf[..n])
+                    .map(|kind| kind.mime_type())
+                    .unwrap_or("application/octet-stream");
+                media_type = Some(mime.to_string());
+                if modality_type.is_none() {
+                    modality_type = modality_type_from_mime(mime);
+                }
+            }
 
             let code = HashFunctionCode::Blake3_256;
             let hash_algorithm = HashFunction::from(code.clone());
@@ -89,9 +104,8 @@ fn parse_modality(s: &str) -> Result<Modality, String> {
             let said = hash_algorithm.derive_from_stream(file_reader).unwrap();
 
 
-            let modality_type = modality_type_from_mime(mime);
-            let mut modality = Modality { digest: None, modality_said: Some(said), modality_type,
-                media_type: mime.to_string(), oca_bundle: Semantic::Reference(b) };
+            let mut modality = Modality { digest: None, modality_said: Some(said), modality_type: modality_type.unwrap(),
+                media_type: media_type.unwrap(), oca_bundle: Semantic::Reference(b) };
 
             modality.compute_digest();
             Ok(modality)
