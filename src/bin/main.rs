@@ -5,6 +5,7 @@ use said::SelfAddressingIdentifier;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::PathBuf;
+use serde::{Deserialize, Serialize};
 
 #[derive(Parser)]
 #[command(name = "m2io")]
@@ -21,9 +22,16 @@ enum Commands {
         #[arg(short = 'm', long = "modalities",
             value_parser = parse_modality,
             num_args = 0..,
-            help = "Specify a modality using: file=path,bundle_said=<SAID>. Repeat for multiple modalities."
+            help = "Specify a modality using: file=path,bundle_said=<SAID>. Repeat for multiple modalities.",
+            conflicts_with = "manifest"
         )]
         modalities: Vec<Modality>,
+
+        #[arg(short = 'f', long = "manifest",
+            help = "Path to a manifest file (JSON or CSV) containing modality definitions",
+            conflicts_with = "modalities"
+        )]
+        manifest: Option<PathBuf>,
 
         #[arg(short, long)]
         output: PathBuf,
@@ -36,6 +44,16 @@ enum Commands {
         #[arg(long = "file")]
         file: PathBuf,
     },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ModalityManifestEntry {
+    file_name: String,
+    bundle_said: String,
+    #[serde(default)]
+    modality_type: Option<String>,
+    #[serde(default)]
+    media_type: Option<String>,
 }
 
 fn modality_type_from_mime(mime: &str) -> Option<ModalityType> {
@@ -54,7 +72,6 @@ fn modality_type_from_mime(mime: &str) -> Option<ModalityType> {
         Some(ModalityType::Text)
     }
 }
-
 
 fn parse_modality(s: &str) -> Result<Modality, String> {
     let mut file = None;
@@ -82,47 +99,118 @@ fn parse_modality(s: &str) -> Result<Modality, String> {
 
     match (file, bundle_said) {
         (Some(f), Some(b)) => {
-
-            let mut buf = [0; 512];
-            let mut file_reader = File::open(&f).map_err(|e| format!("Cannot open file: {}", e))?;
-            let n = file_reader.read(&mut buf).map_err(|e| format!("Read error: {}", e))?;
-
-            if media_type.is_none() {
-                // Infer MIME type from file content
-                let mime = infer::get(&buf[..n])
-                    .map(|kind| kind.mime_type())
-                    .unwrap_or("application/octet-stream");
-                media_type = Some(mime.to_string());
-                if modality_type.is_none() {
-                    modality_type = modality_type_from_mime(mime);
-                }
-            }
-
-            let code = HashFunctionCode::Blake3_256;
-            let hash_algorithm = HashFunction::from(code.clone());
-
-            let said = hash_algorithm.derive_from_stream(file_reader).unwrap();
-
-
-            let mut modality = Modality { digest: None, modality_said: Some(said), modality_type: modality_type.unwrap(),
-                media_type: media_type.unwrap(), oca_bundle: Semantic::Reference(b) };
-
-            modality.compute_digest();
-            Ok(modality)
+            create_modality_from_file(&f, b, modality_type, media_type)
         },
         _ => Err("Both file and semantic must be provided.".to_string()),
     }
+}
+
+fn create_modality_from_file(
+    file_path: &str,
+    bundle_said: SelfAddressingIdentifier,
+    modality_type: Option<ModalityType>,
+    media_type: Option<String>,
+) -> Result<Modality, String> {
+    let mut buf = [0; 512];
+    let mut file_reader = File::open(file_path).map_err(|e| format!("Cannot open file: {}", e))?;
+    let n = file_reader.read(&mut buf).map_err(|e| format!("Read error: {}", e))?;
+
+    let (final_media_type, final_modality_type) = if media_type.is_none() {
+        // Infer MIME type from file content
+        let mime = infer::get(&buf[..n])
+            .map(|kind| kind.mime_type())
+            .unwrap_or("application/octet-stream");
+        let mt = media_type.unwrap_or_else(|| mime.to_string());
+        let mod_type = modality_type.or_else(|| modality_type_from_mime(mime));
+        (mt, mod_type)
+    } else {
+        (media_type.unwrap(), modality_type)
+    };
+
+    let final_modality_type = final_modality_type.ok_or_else(|| "Could not determine modality type".to_string())?;
+
+    let code = HashFunctionCode::Blake3_256;
+    let hash_algorithm = HashFunction::from(code.clone());
+
+    let said = hash_algorithm.derive_from_stream(file_reader).unwrap();
+
+    let mut modality = Modality {
+        digest: None,
+        modality_said: Some(said),
+        modality_type: final_modality_type,
+        media_type: final_media_type,
+        oca_bundle: Semantic::Reference(bundle_said)
+    };
+
+    modality.compute_digest();
+    Ok(modality)
+}
+
+fn load_modalities_from_manifest(manifest_path: &PathBuf) -> Result<Vec<Modality>, String> {
+    let mut file = File::open(manifest_path)
+        .map_err(|e| format!("Failed to open manifest file: {}", e))?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)
+        .map_err(|e| format!("Failed to read manifest file: {}", e))?;
+
+    // Try to parse as JSON first
+    let entries: Vec<ModalityManifestEntry> = if manifest_path.extension().and_then(|s| s.to_str()) == Some("json") {
+        serde_json::from_str(&contents)
+            .map_err(|e| format!("Failed to parse JSON manifest: {}", e))?
+    } else if manifest_path.extension().and_then(|s| s.to_str()) == Some("csv") {
+        // Parse as CSV
+        let mut reader = csv::Reader::from_reader(contents.as_bytes());
+        reader.deserialize()
+            .collect::<Result<Vec<ModalityManifestEntry>, _>>()
+            .map_err(|e| format!("Failed to parse CSV manifest: {}", e))?
+    } else {
+        return Err("Manifest file must have .json or .csv extension".to_string());
+    };
+
+    let mut modalities = Vec::new();
+    for entry in entries {
+        let bundle_said: SelfAddressingIdentifier = entry.bundle_said.parse()
+            .map_err(|e| format!("Invalid bundle_said '{}': {}", entry.bundle_said, e))?;
+
+        let modality_type = if let Some(mt_str) = entry.modality_type {
+            Some(mt_str.parse::<ModalityType>()
+                .map_err(|e| format!("Invalid modality_type '{}': {}", mt_str, e))?)
+        } else {
+            None
+        };
+
+        let modality = create_modality_from_file(
+            &entry.file_name,
+            bundle_said,
+            modality_type,
+            entry.media_type,
+        )?;
+
+        modalities.push(modality);
+    }
+
+    Ok(modalities)
 }
 
 fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Create { modalities, output } => {
+        Commands::Create { modalities, manifest, output } => {
+            let final_modalities = if let Some(manifest_path) = manifest {
+                load_modalities_from_manifest(&manifest_path)
+                    .expect("Failed to load modalities from manifest")
+            } else if !modalities.is_empty() {
+                modalities
+            } else {
+                eprintln!("Error: Either --modalities or --manifest must be provided");
+                std::process::exit(1);
+            };
+
             let mut mmio = MMIO {
                 version: "0.1".to_string(),
                 digest: None,
-                modalities,
+                modalities: final_modalities,
             };
 
             mmio.compute_digest();
