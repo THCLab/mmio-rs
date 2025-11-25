@@ -1,7 +1,7 @@
 [package]
 name = "m2io_tmp"
-version = "0.2.0"
-edition = "2021"
+version = "0.3.0"
+edition = "2024"
 license = "EUPL-1.2"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -15,16 +15,16 @@ name = "m2io"
 path = "src/bin/main.rs"
 
 [dependencies]
-pyo3 = "0.22.0"
-oca-sdk-rs = { version = "2.0.0-rc1", path = "../oca-sdk-rs" }
-said = { version = "0.5.0", features = ["file"], path = "../cesrox/said" }
+pyo3 = "0.26"
+oca-sdk-rs = { version = "2.0.0-rc1" }
+said = { version = "0.5.2", features = ["file"] }
 maplit = "1.0.2"
 lazy_static = "1.5.0"
-indexmap = { version = "1.9.3", features = ["serde"]}
+indexmap = { version = "2.12", features = ["serde"]}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-polars = "0.42.0"
-pyo3-polars = "0.16.1"
+polars = "0.52"
+pyo3-polars = "0.25"
 
 # Binary dependencies
 clap = { version = "4.4", features = ["derive"] }

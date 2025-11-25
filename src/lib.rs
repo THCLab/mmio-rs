@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 
 use oca_sdk_rs::OCABundleModel;
-use pyo3::{exceptions::PyValueError, prelude::*};
+use pyo3::{exceptions::PyValueError, prelude::*, types::PyString};
+
 use said::{make_me_happy, SelfAddressingIdentifier};
 use serde::{Deserialize, Serialize};
 use said::derivation::HashFunctionCode;
@@ -97,16 +98,25 @@ impl std::fmt::Display for ModalityType {
     }
 }
 
+impl<'py> IntoPyObject<'py> for ModalityType {
+    // We'll represent it in Python as a `str` (PyString)
+    type Target = PyString;
+    type Output = Bound<'py, PyString>;
+    // &str -> PyString conversion *can* theoretically error,
+    // so we just use `PyErr` here.
+    type Error = PyErr;
 
-impl IntoPy<PyObject> for ModalityType {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        match self {
-            ModalityType::Image => "image".into_py(py),
-            ModalityType::Audio => "audio".into_py(py),
-            ModalityType::Text => "text".into_py(py),
-            ModalityType::Binary => "binary".into_py(py),
-            ModalityType::Video => "video".into_py(py),
-        }
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        let s: &str = match self {
+            ModalityType::Image  => "image",
+            ModalityType::Audio  => "audio",
+            ModalityType::Text   => "text",
+            ModalityType::Binary => "binary",
+            ModalityType::Video  => "video",
+        };
+
+        Ok(PyString::new(py, s))
+
     }
 }
 
