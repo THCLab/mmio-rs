@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use m2io_tmp::{Modality, ModalityType, Semantic, MMIO};
 use said::derivation::{HashFunction, HashFunctionCode};
 use said::SelfAddressingIdentifier;
@@ -6,10 +6,17 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::PathBuf;
 
+const VERSION: &str = env!("M2IO_VERSION");
+
 #[derive(Parser)]
 #[command(name = "m2io")]
 #[command(about = "Multimodal Integration Object CLI", long_about = None)]
+#[command(version = VERSION)]
+#[command(disable_version_flag = true)]
 struct Cli {
+    #[arg(short = 'v', long = "version", action = ArgAction::Version, help = "Print version")]
+    version: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -55,7 +62,6 @@ fn modality_type_from_mime(mime: &str) -> Option<ModalityType> {
     }
 }
 
-
 fn parse_modality(s: &str) -> Result<Modality, String> {
     let mut file = None;
     let mut bundle_said = None;
@@ -69,12 +75,11 @@ fn parse_modality(s: &str) -> Result<Modality, String> {
             (Some("bundle_said"), Some(v)) => {
                 let said: SelfAddressingIdentifier = v.parse().unwrap();
                 bundle_said = Some(said);
-
-            },
+            }
             (Some("modality_type"), Some(v)) => {
                 let mt: ModalityType = v.parse().unwrap();
                 modality_type = Some(mt);
-            },
+            }
             (Some("media_type"), Some(v)) => media_type = Some(v.to_string()),
             _ => return Err(format!("Invalid modality format: {}", part)),
         }
@@ -82,10 +87,11 @@ fn parse_modality(s: &str) -> Result<Modality, String> {
 
     match (file, bundle_said) {
         (Some(f), Some(b)) => {
-
             let mut buf = [0; 512];
             let mut file_reader = File::open(&f).map_err(|e| format!("Cannot open file: {}", e))?;
-            let n = file_reader.read(&mut buf).map_err(|e| format!("Read error: {}", e))?;
+            let n = file_reader
+                .read(&mut buf)
+                .map_err(|e| format!("Read error: {}", e))?;
 
             if media_type.is_none() {
                 // Infer MIME type from file content
@@ -103,13 +109,17 @@ fn parse_modality(s: &str) -> Result<Modality, String> {
 
             let said = hash_algorithm.derive_from_stream(file_reader).unwrap();
 
-
-            let mut modality = Modality { digest: None, modality_said: Some(said), modality_type: modality_type.unwrap(),
-                media_type: media_type.unwrap(), oca_bundle: Semantic::Reference(b) };
+            let mut modality = Modality {
+                digest: None,
+                modality_said: Some(said),
+                modality_type: modality_type.unwrap(),
+                media_type: media_type.unwrap(),
+                oca_bundle: Semantic::Reference(b),
+            };
 
             modality.compute_digest();
             Ok(modality)
-        },
+        }
         _ => Err("Both file and semantic must be provided.".to_string()),
     }
 }
@@ -134,15 +144,21 @@ fn main() {
         Commands::Parse { mmio } => {
             let mut file = File::open(&mmio).expect("Failed to open MMIO file");
             let mut contents = String::new();
-            file.read_to_string(&mut contents).expect("Failed to read MMIO file");
+            file.read_to_string(&mut contents)
+                .expect("Failed to read MMIO file");
 
             let mmio: MMIO = serde_json::from_str(&contents).expect("Failed to parse MMIO");
             // Verify if the SAID are valid
             for modality in &mmio.modalities {
                 if let Some(said) = &modality.digest {
-                    let mut  m = modality.clone();
+                    let mut m = modality.clone();
                     m.compute_digest();
-                    assert_eq!(said, &m.digest.unwrap(), "SAID mismatch for modality: \n {:?}", modality);
+                    assert_eq!(
+                        said,
+                        &m.digest.unwrap(),
+                        "SAID mismatch for modality: \n {:?}",
+                        modality
+                    );
                 } else {
                     println!("No SAID found for modality: {:?}", modality);
                 }
@@ -170,4 +186,3 @@ fn main() {
         }
     }
 }
-
