@@ -2,9 +2,9 @@
 
 use oca_sdk_rs::OCABundleModel;
 use pyo3::{exceptions::PyValueError, prelude::*};
+use said::derivation::HashFunctionCode;
 use said::{make_me_happy, SelfAddressingIdentifier};
 use serde::{Deserialize, Serialize};
-use said::derivation::HashFunctionCode;
 
 #[pyclass]
 pub struct PySaid {
@@ -14,7 +14,9 @@ pub struct PySaid {
 
 impl From<said::SelfAddressingIdentifier> for PySaid {
     fn from(said: said::SelfAddressingIdentifier) -> Self {
-        PySaid { value: said.to_string() }
+        PySaid {
+            value: said.to_string(),
+        }
     }
 }
 
@@ -69,7 +71,6 @@ pub enum ModalityType {
     Binary,
 }
 
-
 impl std::str::FromStr for ModalityType {
     type Err = String;
 
@@ -80,7 +81,10 @@ impl std::str::FromStr for ModalityType {
             "audio" => Ok(ModalityType::Audio),
             "video" => Ok(ModalityType::Video),
             "binary" => Ok(ModalityType::Binary),
-            _ => Err(format!("Invalid modality type: '{}'. Valid types are: image, text, audio, video, binary", s)),
+            _ => Err(format!(
+                "Invalid modality type: '{}'. Valid types are: image, text, audio, video, binary",
+                s
+            )),
         }
     }
 }
@@ -93,19 +97,6 @@ impl std::fmt::Display for ModalityType {
             ModalityType::Audio => write!(f, "audio"),
             ModalityType::Video => write!(f, "video"),
             ModalityType::Binary => write!(f, "binary"),
-        }
-    }
-}
-
-
-impl IntoPy<PyObject> for ModalityType {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        match self {
-            ModalityType::Image => "image".into_py(py),
-            ModalityType::Audio => "audio".into_py(py),
-            ModalityType::Text => "text".into_py(py),
-            ModalityType::Binary => "binary".into_py(py),
-            ModalityType::Video => "video".into_py(py),
         }
     }
 }
@@ -135,18 +126,21 @@ impl PyOCABundle {
     }
 }
 
-
 #[pymethods]
 impl PySemantic {
     #[staticmethod]
     pub fn reference(said: String) -> Self {
         let id: SelfAddressingIdentifier = said.parse().unwrap();
-        Self { inner: Semantic::Reference(id) }
+        Self {
+            inner: Semantic::Reference(id),
+        }
     }
 
     #[staticmethod]
     pub fn bundle(bundle: &PyOCABundle) -> Self {
-        Self { inner: Semantic::Bundle(bundle.into_inner().clone()) }
+        Self {
+            inner: Semantic::Bundle(bundle.into_inner().clone()),
+        }
     }
 
     pub fn is_reference(&self) -> bool {
@@ -168,8 +162,6 @@ impl PySemantic {
     }
 }
 
-
-
 impl MMIO {
     fn new() -> Self {
         Self {
@@ -185,22 +177,30 @@ impl Modality {
     #[getter]
     fn get_id(&self) -> PySaid {
         self.digest.clone().map_or_else(
-            || PySaid { value: "None".to_string() },
-            |id| PySaid { value: id.to_string() },
+            || PySaid {
+                value: "None".to_string(),
+            },
+            |id| PySaid {
+                value: id.to_string(),
+            },
         )
     }
 
     #[getter]
     fn get_modality_said(&self) -> PySaid {
         self.modality_said.clone().map_or_else(
-            || PySaid { value: "None".to_string() },
-            |said| PySaid { value: said.to_string() },
+            || PySaid {
+                value: "None".to_string(),
+            },
+            |said| PySaid {
+                value: said.to_string(),
+            },
         )
     }
 
     #[getter]
-    fn get_modality_type(&self) -> ModalityType {
-        self.modality_type.clone()
+    fn get_modality_type(&self) -> String {
+        self.modality_type.to_string()
     }
 
     #[getter]
@@ -212,7 +212,9 @@ impl Modality {
     fn get_oca_bundle(&self) -> PySemantic {
         match &self.oca_bundle {
             Semantic::Reference(said) => PySemantic::reference(said.to_string()),
-            Semantic::Bundle(bundle) => PySemantic::bundle(&PyOCABundle { inner: bundle.clone() }),
+            Semantic::Bundle(bundle) => PySemantic::bundle(&PyOCABundle {
+                inner: bundle.clone(),
+            }),
         }
     }
 }
@@ -293,7 +295,6 @@ fn m2io_tmp(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
