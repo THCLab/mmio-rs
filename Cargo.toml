@@ -1,5 +1,7 @@
 [package]
 name = "m2io_tmp"
+description = "Multi modal integration object (MMIO) implementation in Rust"
+documentation = "github.com/THCLab/NextGen/"
 version = "0.2.0"
 edition = "2021"
 license = "EUPL-1.2"
