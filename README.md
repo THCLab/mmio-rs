@@ -1,20 +1,36 @@
 # MMIO – MultiModal Integration Object
 
-## Installation
+## CLI Installation & Usage
 
+### Build
+
+```bash
+cargo build --release
 ```
-pip install m2io_tmp # name will change to m2io
+
+The binary will be at `target/release/m2io`.
+
+### Install
+
+```bash
+cargo install --path .
 ```
 
-## Usage
-
-Look at the example notebooks in [`docs/examples/notebooks`](https://github.com/THCLab/mmio-rs/tree/main/docs/examples/notebooks).
-
-## Development
-Install [maturin](https://www.maturin.rs/installation)
+---
 
 ### Run
-`maturin develop && python p.py`
+
+```bash
+target/release/m2io --help
+```
+
+---
+
+## Python
+
+> **TODO / WIP** – Python bindings are currently under development.
+
+---
 
 ## License
 
